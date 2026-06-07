@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -o pipefail
-
 # Color codes
 CYAN='\e[36m'
 YELLOW='\e[33m'
@@ -10,127 +8,47 @@ GREEN='\e[32m'
 ENDCOLOR='\e[0m'
 BOLD='\e[1m'
 
-MENU_LOCKED=0
-
-cleanup() {
-    trap - INT TSTP EXIT
-    printf '%b' "$ENDCOLOR"
-}
-
-menu_interrupt() {
-    echo
-    echo -e "${YELLOW}Use option 3 to exit from the menu.${ENDCOLOR}"
-}
-
-menu_suspend() {
-    echo
-    echo -e "${YELLOW}Ctrl+Z is disabled in the menu. Choose option 3 to exit.${ENDCOLOR}"
-}
-
+# Functions to control Ctrl+C / Ctrl+Z
 enable_menu_lock() {
-    MENU_LOCKED=1
-    trap menu_interrupt INT
-    trap menu_suspend TSTP
+    # Disable Ctrl+C and Ctrl+Z (only for menu)
+    trap '' INT
+    trap '' TSTP
 }
 
 disable_menu_lock() {
-    MENU_LOCKED=0
+    # Restore default behavior (Ctrl+C etc. works normally)
     trap - INT
     trap - TSTP
 }
 
-return_to_menu() {
-    echo
-    read -r -p "Press Enter to return to the menu..."
-    clear
-    show_main_banner
-}
-
-run_with_normal_signals() {
-    disable_menu_lock
-    "$@"
-    local status=$?
-
-    if [[ $status -eq 130 ]]; then
-        echo
-        echo -e "${YELLOW}Cancelled. Returning to menu...${ENDCOLOR}"
-    elif [[ $status -ne 0 ]]; then
-        echo
-        echo -e "${RED}Command failed with exit code ${status}.${ENDCOLOR}"
-    fi
-
-    return "$status"
-}
+# By Lifeboy banner (shown for 2 seconds)
+echo -e "${YELLOW}${BOLD}"
+cat << "EOF"
+â•”â•— â”¬ â”¬       â”¬  â”¬â”Œâ”€â”â”Œâ”€â”â”Œâ” â”Œâ”€â”â”¬ â”¬
+â• â•©â•—â””â”¬â”˜  â”€â”€â”€  â”‚  â”‚â”œâ”¤ â”œâ”¤ â”œâ”´â”â”‚ â”‚â””â”¬â”˜
+â•šâ•â• â”´        â”´â”€â”˜â”´â””  â””â”€â”˜â””â”€â”˜â””â”€â”˜ â”´
+EOF
+echo -e "${ENDCOLOR}"
+sleep 2
+clear
 
 show_main_banner() {
     echo -e "${CYAN}${BOLD}"
     cat << "EOF"
- _       _________ _______  _______  _______  _        _______           ______
-( \      \__   __/(  ____ \(  ____ \(  ____ \( \      (  ___  )|\     /|(  __  \
-| (         ) (   | (    \/| (    \/| (    \/| (      | (   ) || )   ( || (  \  )
-| |         | |   | (__    | (__    | |      | |      | |   | || |   | || |   ) |
-| |         | |   |  __)   |  __)   | |      | |      | |   | || |   | || |   | |
-| |         | |   | (      | (      | |      | |      | |   | || |   | || |   ) |
-| (____/\___) (___| )      | (____/\| (____/\| (____/\| (___) || (___) || (__/  )
-(_______/\_______/|/       (_______/(_______/(_______/(_______)(_______)(______/
-
-_________ _        _______ _________ _______  _        _        _______  _______
-\__   __/( (    /|(  ____ \\__   __/(  ___  )( \      ( \      (  ____ \(  ____ )
-   ) (   |  \  ( || (    \/   ) (   | (   ) || (      | (      | (    \/| (    )|
-   | |   |   \ | || (_____    | |   | (___) || |      | |      | (__    | (____)|
-   | |   | (\ \) |(_____  )   | |   |  ___  || |      | |      |  __)   |     __)
-   | |   | | \   |      ) |   | |   | (   ) || |      | |      | (      | (\ (
-___) (___| )  \  |/\____) |   | |   | )   ( || (____/\| (____/\| (____/\| ) \ \__
-\_______/|/    )_)\_______)   )_(   |/     \|(_______/(_______/(_______/|/   \__/
+â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—    â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—
+â–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘    â–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘
+â–ˆâ–ˆâ•”â–ˆâ–ˆâ–ˆâ–ˆâ•”â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘    â–ˆâ–ˆâ•”â–ˆâ–ˆâ–ˆâ–ˆâ•”â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘
+â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘    â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â•  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘
+â–ˆâ–ˆâ•‘ â•šâ•â• â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘    â–ˆâ–ˆâ•‘ â•šâ•â• â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•
+â•šâ•â•     â•šâ•â•â•šâ•â•  â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•â•    â•šâ•â•     â•šâ•â•â•šâ•â•â•â•â•â•â•â•šâ•â•  â•šâ•â•â•â• â•šâ•â•â•â•â•â•
 EOF
     echo -e "${ENDCOLOR}"
 }
 
-install_pterodactyl() {
-    echo -e "${GREEN}Running Pterodactyl installation...${ENDCOLOR}"
-    bash <(curl -fsSL https://pterodactyl-installer.se/)
-}
-
-install_cloudflared() {
-    echo -e "${YELLOW}${BOLD}Adding Cloudflare gpg key...${ENDCOLOR}"
-    sudo mkdir -p --mode=0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg \
-        | sudo tee /usr/share/keyrings/cloudflare-public-v2.gpg >/dev/null
-
-    echo -e "${YELLOW}Adding Cloudflared repo to your apt repositories...${ENDCOLOR}"
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-public-v2.gpg] https://pkg.cloudflare.com/cloudflared any main" \
-        | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-
-    echo -e "${YELLOW}Installing cloudflared...${ENDCOLOR}"
-    sudo apt-get update
-    sudo apt-get install -y cloudflared
-
-    echo -e "${GREEN}${BOLD}Cloudflared installation completed!${ENDCOLOR}"
-}
-
-install_playit() {
-    echo -e "${YELLOW}Installing Playit.gg...${ENDCOLOR}"
-    curl -fsSL https://playit-cloud.github.io/ppa/key.gpg \
-        | gpg --dearmor \
-        | sudo tee /etc/apt/trusted.gpg.d/playit.gpg >/dev/null
-
-    echo "deb [signed-by=/etc/apt/trusted.gpg.d/playit.gpg] https://playit-cloud.github.io/ppa/data ./" \
-        | sudo tee /etc/apt/sources.list.d/playit-cloud.list >/dev/null
-
-    sudo apt-get update
-    sudo apt-get install -y playit
-
-    echo -e "${GREEN}${BOLD}Playit.gg installation completed!${ENDCOLOR}"
-    echo -e "${YELLOW}Starting Playit client. Press Ctrl+C to stop it and return here.${ENDCOLOR}"
-    playit
-    echo -e "${GREEN}${BOLD}Playit session finished.${ENDCOLOR}"
-}
-
-trap cleanup EXIT
-clear
 show_main_banner
 
 while true; do
+    # Yahan sirf MENU ke liye Ctrl+C disable
     enable_menu_lock
 
     echo -e "${GREEN}0) Install Pterodactyl Panel + Wings${ENDCOLOR}"
@@ -138,33 +56,68 @@ while true; do
     echo -e "${CYAN}2) Install Playit.gg${ENDCOLOR}"
     echo -e "${RED}3) Exit${ENDCOLOR}"
     echo -e "${CYAN}Select an option [0-3]:${ENDCOLOR}"
+    read -r choice
 
-    if ! read -r choice; then
-        echo
-        continue
-    fi
+    # User ne choice select kar li -> ab installers ke liye Ctrl+C wapas normal
+    disable_menu_lock
 
     case "$choice" in
         0)
-            run_with_normal_signals install_pterodactyl
-            return_to_menu
+            echo -e "${GREEN}Running Pterodactyl installation...${ENDCOLOR}"
+            bash <(curl -s https://pterodactyl-installer.se/)
+            # Installer se nikal ke wapas menu banner
+            clear
+            show_main_banner
             ;;
+
         1)
-            run_with_normal_signals install_cloudflared
-            return_to_menu
+            echo -e "${YELLOW}${BOLD}Adding Cloudflare gpg key...${ENDCOLOR}"
+            sudo mkdir -p --mode=0755 /usr/share/keyrings >/dev/null 2>&1
+            curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg \
+              | sudo tee /usr/share/keyrings/cloudflare-public-v2.gpg >/dev/null 2>&1
+
+            echo -e "${YELLOW}Adding Cloudflared repo to your apt repositories...${ENDCOLOR}"
+            echo "deb [signed-by=/usr/share/keyrings/cloudflare-public-v2.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+              | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null 2>&1
+
+            echo -e "${YELLOW}Installing cloudflared...${ENDCOLOR}"
+            sudo apt-get update >/dev/null 2>&1
+            sudo apt-get install -y cloudflared >/dev/null 2>&1
+
+            echo -e "${GREEN}${BOLD}Cloudflared installation completed!${ENDCOLOR}"
+            sleep 2
+            clear
+            show_main_banner
             ;;
+
         2)
-            run_with_normal_signals install_playit
-            return_to_menu
+            echo -e "${YELLOW}Installing Playit.gg...${ENDCOLOR}"
+            curl -SsL https://playit-cloud.github.io/ppa/key.gpg \
+              | gpg --dearmor \
+              | sudo tee /etc/apt/trusted.gpg.d/playit.gpg >/dev/null
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/playit.gpg] https://playit-cloud.github.io/ppa/data ./" \
+              | sudo tee /etc/apt/sources.list.d/playit-cloud.list >/dev/null
+
+            sudo apt update >/dev/null 2>&1
+            sudo apt install -y playit >/dev/null 2>&1
+
+            echo -e "${GREEN}${BOLD}Playit.gg installation completed!${ENDCOLOR}"
+            echo -e "${YELLOW}Starting Playit client...${ENDCOLOR}"
+            # Yahan Ctrl+C allowed hai, user Playit se normal bahar aa sakta hai
+            playit
+            echo -e "${GREEN}${BOLD}Playit session finished. Returning to menu...${ENDCOLOR}"
+            read -rp "Press Enter to continue..."
+            clear
+            show_main_banner
             ;;
+
         3)
-            disable_menu_lock
             echo -e "${RED}Exiting.${ENDCOLOR}"
             exit 0
             ;;
+
         *)
             echo -e "${RED}Invalid option. Please select 0, 1, 2, or 3.${ENDCOLOR}"
-            echo
             ;;
     esac
 done
