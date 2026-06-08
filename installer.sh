@@ -111,6 +111,8 @@ run_action() {
     if [[ $status -eq 130 ]]; then
         warn "Cancelled. Returning to menu..."
         sleep 1
+    elif [[ $status -eq 2 ]]; then
+        pause
     elif [[ $status -ne 0 ]]; then
         fail "Action failed with exit code $status."
         warn "Log file: $LOG_FILE"
@@ -360,6 +362,148 @@ delete_pterodactyl_panel_wings() {
     run_pterodactyl_uninstaller \
         "Pterodactyl Panel + Wings deletion" \
         "When prompted: answer Y for both panel removal and Wings removal."
+}
+
+resolve_pterodactyl_directory() {
+    local default_dir="/var/www/pterodactyl"
+    local custom_dir
+
+    export PTERODACTYL_DIRECTORY="$default_dir"
+
+    if [[ -d "$PTERODACTYL_DIRECTORY" ]]; then
+        success "Found Pterodactyl directory: $PTERODACTYL_DIRECTORY"
+        if [[ ! -f "$PTERODACTYL_DIRECTORY/artisan" ]]; then
+            warn "This directory does not contain an artisan file. Make sure it is really your Pterodactyl panel directory."
+            confirm "Continue anyway?" || return 2
+        fi
+        return 0
+    fi
+
+    warn "Default Pterodactyl directory was not found: $PTERODACTYL_DIRECTORY"
+    if ! confirm "Did you already install Pterodactyl Panel?"; then
+        warn "Install Pterodactyl Panel first, then return to Blueprint Manager."
+        return 2
+    fi
+
+    echo
+    info "Example directory format: /var/www/pterodactyl"
+    read -r -p "Enter your Pterodactyl directory: " custom_dir
+
+    if [[ -z "$custom_dir" || ! -d "$custom_dir" ]]; then
+        fail "That directory does not exist: ${custom_dir:-empty}"
+        return 2
+    fi
+
+    export PTERODACTYL_DIRECTORY="$custom_dir"
+    success "Using Pterodactyl directory: $PTERODACTYL_DIRECTORY"
+
+    if [[ ! -f "$PTERODACTYL_DIRECTORY/artisan" ]]; then
+        warn "This directory does not contain an artisan file. Make sure it is really your Pterodactyl panel directory."
+        confirm "Continue anyway?" || return 2
+    fi
+}
+
+install_blueprint_dependencies() {
+    preflight || return 1
+    require_apt_system || return 1
+    require_command gpg || return 1
+
+    run_step "Installing Blueprint base dependencies" \
+        $SUDO apt-get install -y ca-certificates curl git gnupg unzip wget zip || return 1
+
+    run_step "Creating NodeSource keyring directory" \
+        $SUDO mkdir -p /etc/apt/keyrings || return 1
+
+    run_step "Adding Node.js 22 apt repository key" \
+        bash -c "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor | $SUDO tee /etc/apt/keyrings/nodesource.gpg >/dev/null" || return 1
+
+    run_step "Adding Node.js 22 apt repository" \
+        bash -c "echo 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null" || return 1
+
+    run_step "Updating apt package lists" \
+        $SUDO apt-get update || return 1
+
+    run_step "Installing Node.js" \
+        $SUDO apt-get install -y nodejs || return 1
+
+    run_step "Installing Yarn globally" \
+        $SUDO npm i -g yarn || return 1
+
+    run_step "Installing Pterodactyl Node dependencies" \
+        $SUDO bash -c "cd \"$PTERODACTYL_DIRECTORY\" && yarn install"
+}
+
+download_blueprint_release() {
+    run_step "Downloading Blueprint latest release" \
+        $SUDO wget "https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip" -O "$PTERODACTYL_DIRECTORY/release.zip" || return 1
+
+    run_step "Unzipping Blueprint release" \
+        $SUDO bash -c "cd \"$PTERODACTYL_DIRECTORY\" && unzip -o release.zip"
+}
+
+configure_blueprint() {
+    run_step "Creating Blueprint configuration file" \
+        $SUDO touch "$PTERODACTYL_DIRECTORY/.blueprintrc" || return 1
+
+    run_step "Writing Blueprint configuration" \
+        $SUDO bash -c "cat > \"$PTERODACTYL_DIRECTORY/.blueprintrc\" <<'BLUEPRINT_CONFIG'
+WEBUSER=\"www-data\";
+OWNERSHIP=\"www-data:www-data\";
+USERSHELL=\"/bin/bash\";
+BLUEPRINT_CONFIG"
+
+    echo
+    confirm "Is Blueprint configured successfully and ready to run?" || return 2
+}
+
+run_blueprint_script() {
+    run_step "Giving blueprint.sh execute permission" \
+        $SUDO chmod +x "$PTERODACTYL_DIRECTORY/blueprint.sh" || return 1
+
+    run_step "Running Blueprint installer" \
+        $SUDO bash "$PTERODACTYL_DIRECTORY/blueprint.sh"
+}
+
+install_blueprint() {
+    resolve_pterodactyl_directory || return $?
+
+    confirm "Install Blueprint in $PTERODACTYL_DIRECTORY?" || return 0
+
+    install_blueprint_dependencies || return 1
+    download_blueprint_release || return 1
+    configure_blueprint || return $?
+    run_blueprint_script
+}
+
+reinstall_blueprint() {
+    resolve_pterodactyl_directory || return $?
+
+    confirm "Reinstall Blueprint in $PTERODACTYL_DIRECTORY? This will overwrite Blueprint files." || return 0
+
+    remove_blueprint_files "quiet" || return 1
+    install_blueprint_dependencies || return 1
+    download_blueprint_release || return 1
+    configure_blueprint || return $?
+    run_blueprint_script
+}
+
+remove_blueprint_files() {
+    local mode="${1:-confirm}"
+
+    if [[ "$mode" != "quiet" ]]; then
+        resolve_pterodactyl_directory || return $?
+        warn "This removes Blueprint files from the panel directory."
+        warn "It does not fully restore Pterodactyl files that Blueprint may have patched."
+        confirm "Delete Blueprint files from $PTERODACTYL_DIRECTORY?" || return 0
+    fi
+
+    run_step "Removing Blueprint files" \
+        $SUDO rm -rf \
+            "$PTERODACTYL_DIRECTORY/.blueprint" \
+            "$PTERODACTYL_DIRECTORY/.blueprintrc" \
+            "$PTERODACTYL_DIRECTORY/blueprint.sh" \
+            "$PTERODACTYL_DIRECTORY/release.zip" \
+            /usr/local/bin/blueprint
 }
 
 install_cloudflared() {
@@ -713,6 +857,12 @@ show_status() {
         warn "tailscale is not installed."
     fi
 
+    if [[ -f /var/www/pterodactyl/blueprint.sh || -f /var/www/pterodactyl/.blueprintrc ]]; then
+        success "Blueprint files found in /var/www/pterodactyl."
+    else
+        warn "Blueprint files not found in /var/www/pterodactyl."
+    fi
+
     echo
     info "Log file for this session: $LOG_FILE"
     pause
@@ -752,6 +902,36 @@ pterodactyl_menu() {
                 ;;
             *)
                 warn "Invalid option. Please select 0 through 8."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+blueprint_menu() {
+    while true; do
+        clear
+        show_menu_banner
+        enable_menu_lock
+
+        echo -e "${BOLD}Blueprint Options${ENDCOLOR}"
+        echo -e "${GREEN}0) Install Blueprint${ENDCOLOR}"
+        echo -e "${YELLOW}1) Reinstall Blueprint${ENDCOLOR}"
+        echo -e "${RED}2) Delete Blueprint files${ENDCOLOR}"
+        echo -e "${YELLOW}3) Back to main menu${ENDCOLOR}"
+        echo
+        read -r -p "Select an option [0-3]: " blueprint_choice
+
+        case "$blueprint_choice" in
+            0) run_action install_blueprint ;;
+            1) run_action reinstall_blueprint ;;
+            2) run_action remove_blueprint_files ;;
+            3)
+                disable_menu_lock
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please select 0 through 3."
                 sleep 1
                 ;;
         esac
@@ -865,27 +1045,29 @@ main_menu() {
         enable_menu_lock
 
         echo -e "${GREEN}0) Pterodactyl Installer${ENDCOLOR}"
-        echo -e "${YELLOW}1) Cloudflared Manager${ENDCOLOR}"
-        echo -e "${CYAN}2) Playit.gg Manager${ENDCOLOR}"
-        echo -e "${BLUE}3) Tailscale Manager${ENDCOLOR}"
-        echo -e "${BLUE}4) Check installed tools${ENDCOLOR}"
-        echo -e "${RED}5) Exit${ENDCOLOR}"
+        echo -e "${CYAN}1) Blueprint Manager${ENDCOLOR}"
+        echo -e "${YELLOW}2) Cloudflared Manager${ENDCOLOR}"
+        echo -e "${CYAN}3) Playit.gg Manager${ENDCOLOR}"
+        echo -e "${BLUE}4) Tailscale Manager${ENDCOLOR}"
+        echo -e "${BLUE}5) Check installed tools${ENDCOLOR}"
+        echo -e "${RED}6) Exit${ENDCOLOR}"
         echo
-        read -r -p "Select an option [0-5]: " choice
+        read -r -p "Select an option [0-6]: " choice
 
         case "$choice" in
             0) disable_menu_lock; pterodactyl_menu ;;
-            1) disable_menu_lock; cloudflared_menu ;;
-            2) disable_menu_lock; playit_menu ;;
-            3) disable_menu_lock; tailscale_menu ;;
-            4) disable_menu_lock; show_status ;;
-            5)
+            1) disable_menu_lock; blueprint_menu ;;
+            2) disable_menu_lock; cloudflared_menu ;;
+            3) disable_menu_lock; playit_menu ;;
+            4) disable_menu_lock; tailscale_menu ;;
+            5) disable_menu_lock; show_status ;;
+            6)
                 disable_menu_lock
                 success "Goodbye."
                 exit 0
                 ;;
             *)
-                warn "Invalid option. Please select 0, 1, 2, 3, 4, or 5."
+                warn "Invalid option. Please select 0 through 6."
                 sleep 1
                 ;;
         esac
