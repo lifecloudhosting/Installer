@@ -416,6 +416,50 @@ install_playit() {
     fi
 }
 
+install_tailscale() {
+    local auth_key
+    local status
+
+    preflight || return 1
+    require_command sh || return 1
+
+    echo -e "${BOLD}Tailscale Setup${ENDCOLOR}"
+    warn "You need a Tailscale auth key from your Tailscale admin console."
+    warn "The key will not be saved in this installer file."
+    echo
+
+    while [[ -z "$auth_key" ]]; do
+        read -r -s -p "Enter Tailscale auth key: " auth_key
+        echo
+        [[ -z "$auth_key" ]] && warn "Auth key cannot be empty."
+    done
+
+    if [[ "$auth_key" != tskey-auth-* ]]; then
+        warn "This does not look like a normal Tailscale auth key."
+        confirm "Continue anyway?" || return 0
+    fi
+
+    run_step "Installing Tailscale" \
+        bash -c "curl -fsSL https://tailscale.com/install.sh | sh" || return 1
+
+    info "Connecting this machine to Tailscale..."
+    if [[ -n "$SUDO" ]]; then
+        sudo tailscale up --auth-key="$auth_key" 2>&1 | tee -a "$LOG_FILE"
+    else
+        tailscale up --auth-key="$auth_key" 2>&1 | tee -a "$LOG_FILE"
+    fi
+    status=${PIPESTATUS[0]}
+
+    unset auth_key
+
+    if [[ $status -ne 0 ]]; then
+        fail "Tailscale connection failed. See log: $LOG_FILE"
+        return "$status"
+    fi
+
+    success "Tailscale installed and connected."
+}
+
 show_status() {
     echo -e "${BOLD}Installed tools:${ENDCOLOR}"
 
@@ -429,6 +473,12 @@ show_status() {
         playit --version 2>/dev/null || success "playit is installed."
     else
         warn "playit is not installed."
+    fi
+
+    if command -v tailscale >/dev/null 2>&1; then
+        tailscale version 2>/dev/null | head -n 1 || success "tailscale is installed."
+    else
+        warn "tailscale is not installed."
     fi
 
     echo
@@ -485,23 +535,25 @@ main_menu() {
         echo -e "${GREEN}0) Pterodactyl Installer${ENDCOLOR}"
         echo -e "${YELLOW}1) Install Cloudflared${ENDCOLOR}"
         echo -e "${CYAN}2) Install Playit.gg${ENDCOLOR}"
-        echo -e "${BLUE}3) Check installed tools${ENDCOLOR}"
-        echo -e "${RED}4) Exit${ENDCOLOR}"
+        echo -e "${BLUE}3) Install Tailscale${ENDCOLOR}"
+        echo -e "${BLUE}4) Check installed tools${ENDCOLOR}"
+        echo -e "${RED}5) Exit${ENDCOLOR}"
         echo
-        read -r -p "Select an option [0-4]: " choice
+        read -r -p "Select an option [0-5]: " choice
 
         case "$choice" in
             0) disable_menu_lock; pterodactyl_menu ;;
             1) run_action install_cloudflared ;;
             2) run_action install_playit ;;
-            3) disable_menu_lock; show_status ;;
-            4)
+            3) run_action install_tailscale ;;
+            4) disable_menu_lock; show_status ;;
+            5)
                 disable_menu_lock
                 success "Goodbye."
                 exit 0
                 ;;
             *)
-                warn "Invalid option. Please select 0, 1, 2, 3, or 4."
+                warn "Invalid option. Please select 0, 1, 2, 3, 4, or 5."
                 sleep 1
                 ;;
         esac
