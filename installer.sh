@@ -382,6 +382,79 @@ install_cloudflared() {
         $SUDO apt-get install -y cloudflared
 }
 
+install_cloudflared_service() {
+    local tunnel_token
+
+    install_cloudflared || return 1
+
+    echo
+    warn "Paste your Cloudflare Tunnel token. It will not be saved in this installer file."
+    while [[ -z "$tunnel_token" ]]; do
+        read -r -s -p "Enter Cloudflare tunnel token: " tunnel_token
+        echo
+        [[ -z "$tunnel_token" ]] && warn "Tunnel token cannot be empty."
+    done
+
+    run_step "Installing Cloudflared tunnel service" \
+        $SUDO cloudflared service install "$tunnel_token"
+
+    unset tunnel_token
+}
+
+remove_cloudflared_service() {
+    preflight || return 1
+
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        warn "cloudflared is not installed."
+        return 0
+    fi
+
+    run_step "Removing Cloudflared service" \
+        $SUDO cloudflared service uninstall
+}
+
+reinstall_cloudflared_service() {
+    local tunnel_token
+
+    preflight || return 1
+
+    if command -v cloudflared >/dev/null 2>&1; then
+        $SUDO cloudflared service uninstall >/dev/null 2>&1 || true
+    fi
+
+    install_cloudflared || return 1
+
+    echo
+    warn "Paste the new Cloudflare Tunnel token. It will not be saved in this installer file."
+    while [[ -z "$tunnel_token" ]]; do
+        read -r -s -p "Enter new Cloudflare tunnel token: " tunnel_token
+        echo
+        [[ -z "$tunnel_token" ]] && warn "Tunnel token cannot be empty."
+    done
+
+    run_step "Installing Cloudflared service with new token" \
+        $SUDO cloudflared service install "$tunnel_token"
+
+    unset tunnel_token
+}
+
+uninstall_cloudflared() {
+    preflight || return 1
+    require_apt_system || return 1
+
+    confirm "Remove Cloudflared package and service files?" || return 0
+
+    if command -v cloudflared >/dev/null 2>&1; then
+        $SUDO cloudflared service uninstall >/dev/null 2>&1 || true
+    fi
+
+    run_step "Removing cloudflared package" \
+        $SUDO apt-get remove -y cloudflared || return 1
+
+    run_step "Removing Cloudflared repository files" \
+        $SUDO rm -f /etc/apt/sources.list.d/cloudflared.list /usr/share/keyrings/cloudflare-main.gpg
+}
+
 install_playit() {
     preflight || return 1
     require_apt_system || return 1
@@ -416,8 +489,67 @@ install_playit() {
     fi
 }
 
+enable_playit_service() {
+    preflight || return 1
+
+    if ! command -v playit >/dev/null 2>&1; then
+        install_playit || return 1
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        fail "systemctl is not available on this system."
+        return 1
+    fi
+
+    run_step "Enabling and starting Playit service" \
+        $SUDO systemctl enable --now playit
+}
+
+disable_playit_service() {
+    preflight || return 1
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        fail "systemctl is not available on this system."
+        return 1
+    fi
+
+    run_step "Stopping and disabling Playit service" \
+        $SUDO systemctl disable --now playit
+}
+
+uninstall_playit() {
+    preflight || return 1
+    require_apt_system || return 1
+
+    confirm "Remove Playit package, service, and repository files?" || return 0
+
+    if command -v systemctl >/dev/null 2>&1; then
+        $SUDO systemctl disable --now playit >/dev/null 2>&1 || true
+    fi
+
+    run_step "Removing playit package" \
+        $SUDO apt-get remove -y playit || return 1
+
+    run_step "Removing Playit repository files" \
+        $SUDO rm -f /etc/apt/sources.list.d/playit.list /etc/apt/sources.list.d/playit-cloud.list /usr/share/keyrings/playit.gpg /etc/apt/trusted.gpg.d/playit.gpg
+}
+
+reinstall_playit() {
+    preflight || return 1
+    require_apt_system || return 1
+
+    if command -v systemctl >/dev/null 2>&1; then
+        $SUDO systemctl disable --now playit >/dev/null 2>&1 || true
+    fi
+
+    $SUDO apt-get remove -y playit >/dev/null 2>&1 || true
+    $SUDO rm -f /etc/apt/sources.list.d/playit.list /etc/apt/sources.list.d/playit-cloud.list /usr/share/keyrings/playit.gpg /etc/apt/trusted.gpg.d/playit.gpg
+
+    install_playit
+}
+
 install_tailscale() {
-    local auth_key
+    local auth_key="${TAILSCALE_AUTH_KEY:-}"
     local status
 
     preflight || return 1
@@ -425,7 +557,7 @@ install_tailscale() {
 
     echo -e "${BOLD}Tailscale Setup${ENDCOLOR}"
     warn "You need a Tailscale auth key from your Tailscale admin console."
-    warn "The key will not be saved in this installer file."
+    warn "The key will not be saved in this installer file or printed on screen."
     echo
 
     while [[ -z "$auth_key" ]]; do
@@ -460,23 +592,101 @@ install_tailscale() {
     success "Tailscale installed and connected."
 }
 
+reconnect_tailscale() {
+    local auth_key="${TAILSCALE_AUTH_KEY:-}"
+    local status
+
+    preflight || return 1
+
+    if ! command -v tailscale >/dev/null 2>&1; then
+        install_tailscale
+        return $?
+    fi
+
+    echo -e "${BOLD}Reconnect Tailscale${ENDCOLOR}"
+    warn "Paste the new Tailscale auth key. It will not be saved in this installer file or printed on screen."
+    echo
+
+    while [[ -z "$auth_key" ]]; do
+        read -r -s -p "Enter new Tailscale auth key: " auth_key
+        echo
+        [[ -z "$auth_key" ]] && warn "Auth key cannot be empty."
+    done
+
+    if [[ "$auth_key" != tskey-auth-* ]]; then
+        warn "This does not look like a normal Tailscale auth key."
+        confirm "Continue anyway?" || return 0
+    fi
+
+    $SUDO tailscale logout >/dev/null 2>&1 || true
+
+    info "Connecting this machine to Tailscale with the new key..."
+    $SUDO tailscale up --auth-key="$auth_key" 2>&1 | tee -a "$LOG_FILE"
+    status=${PIPESTATUS[0]}
+
+    unset auth_key
+
+    if [[ $status -ne 0 ]]; then
+        fail "Tailscale reconnect failed. See log: $LOG_FILE"
+        return "$status"
+    fi
+
+    success "Tailscale reconnected."
+}
+
+logout_tailscale() {
+    preflight || return 1
+
+    if ! command -v tailscale >/dev/null 2>&1; then
+        warn "tailscale is not installed."
+        return 0
+    fi
+
+    run_step "Logging out of Tailscale" \
+        $SUDO tailscale logout
+}
+
+uninstall_tailscale() {
+    preflight || return 1
+    require_apt_system || return 1
+
+    confirm "Remove Tailscale package and log out this machine?" || return 0
+
+    if command -v tailscale >/dev/null 2>&1; then
+        $SUDO tailscale logout >/dev/null 2>&1 || true
+    fi
+
+    run_step "Removing tailscale package" \
+        $SUDO apt-get remove -y tailscale || return 1
+
+    run_step "Removing Tailscale apt repository files" \
+        $SUDO rm -f /etc/apt/sources.list.d/tailscale.list /usr/share/keyrings/tailscale-archive-keyring.gpg
+}
+
 show_status() {
     echo -e "${BOLD}Installed tools:${ENDCOLOR}"
 
     if command -v cloudflared >/dev/null 2>&1; then
         cloudflared --version 2>/dev/null || true
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl is-active cloudflared >/dev/null 2>&1 && success "cloudflared service is active." || warn "cloudflared service is not active."
+        fi
     else
         warn "cloudflared is not installed."
     fi
 
     if command -v playit >/dev/null 2>&1; then
         playit --version 2>/dev/null || success "playit is installed."
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl is-active playit >/dev/null 2>&1 && success "playit service is active." || warn "playit service is not active."
+        fi
     else
         warn "playit is not installed."
     fi
 
     if command -v tailscale >/dev/null 2>&1; then
         tailscale version 2>/dev/null | head -n 1 || success "tailscale is installed."
+        tailscale status >/dev/null 2>&1 && success "tailscale is connected." || warn "tailscale is installed but not connected."
     else
         warn "tailscale is not installed."
     fi
@@ -526,6 +736,106 @@ pterodactyl_menu() {
     done
 }
 
+cloudflared_menu() {
+    while true; do
+        clear
+        show_menu_banner
+        enable_menu_lock
+
+        echo -e "${BOLD}Cloudflared Options${ENDCOLOR}"
+        echo -e "${GREEN}0) Install Cloudflared package only${ENDCOLOR}"
+        echo -e "${GREEN}1) Install Cloudflared + tunnel service token${ENDCOLOR}"
+        echo -e "${YELLOW}2) Reinstall tunnel service with new token${ENDCOLOR}"
+        echo -e "${RED}3) Remove Cloudflared tunnel service${ENDCOLOR}"
+        echo -e "${RED}4) Delete Cloudflared package${ENDCOLOR}"
+        echo -e "${YELLOW}5) Back to main menu${ENDCOLOR}"
+        echo
+        read -r -p "Select an option [0-5]: " cloudflared_choice
+
+        case "$cloudflared_choice" in
+            0) run_action install_cloudflared ;;
+            1) run_action install_cloudflared_service ;;
+            2) run_action reinstall_cloudflared_service ;;
+            3) run_action remove_cloudflared_service ;;
+            4) run_action uninstall_cloudflared ;;
+            5)
+                disable_menu_lock
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please select 0 through 5."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+playit_menu() {
+    while true; do
+        clear
+        show_menu_banner
+        enable_menu_lock
+
+        echo -e "${BOLD}Playit.gg Options${ENDCOLOR}"
+        echo -e "${GREEN}0) Install Playit.gg${ENDCOLOR}"
+        echo -e "${GREEN}1) Enable/start Playit service${ENDCOLOR}"
+        echo -e "${YELLOW}2) Reinstall Playit.gg${ENDCOLOR}"
+        echo -e "${RED}3) Stop/disable Playit service${ENDCOLOR}"
+        echo -e "${RED}4) Delete Playit.gg package${ENDCOLOR}"
+        echo -e "${YELLOW}5) Back to main menu${ENDCOLOR}"
+        echo
+        read -r -p "Select an option [0-5]: " playit_choice
+
+        case "$playit_choice" in
+            0) run_action install_playit ;;
+            1) run_action enable_playit_service ;;
+            2) run_action reinstall_playit ;;
+            3) run_action disable_playit_service ;;
+            4) run_action uninstall_playit ;;
+            5)
+                disable_menu_lock
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please select 0 through 5."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+tailscale_menu() {
+    while true; do
+        clear
+        show_menu_banner
+        enable_menu_lock
+
+        echo -e "${BOLD}Tailscale Options${ENDCOLOR}"
+        echo -e "${GREEN}0) Install and connect with auth key${ENDCOLOR}"
+        echo -e "${YELLOW}1) Reconnect with new auth key${ENDCOLOR}"
+        echo -e "${RED}2) Logout this machine from Tailscale${ENDCOLOR}"
+        echo -e "${RED}3) Delete Tailscale package${ENDCOLOR}"
+        echo -e "${YELLOW}4) Back to main menu${ENDCOLOR}"
+        echo
+        read -r -p "Select an option [0-4]: " tailscale_choice
+
+        case "$tailscale_choice" in
+            0) run_action install_tailscale ;;
+            1) run_action reconnect_tailscale ;;
+            2) run_action logout_tailscale ;;
+            3) run_action uninstall_tailscale ;;
+            4)
+                disable_menu_lock
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please select 0 through 4."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 main_menu() {
     while true; do
         clear
@@ -533,9 +843,9 @@ main_menu() {
         enable_menu_lock
 
         echo -e "${GREEN}0) Pterodactyl Installer${ENDCOLOR}"
-        echo -e "${YELLOW}1) Install Cloudflared${ENDCOLOR}"
-        echo -e "${CYAN}2) Install Playit.gg${ENDCOLOR}"
-        echo -e "${BLUE}3) Install Tailscale${ENDCOLOR}"
+        echo -e "${YELLOW}1) Cloudflared Manager${ENDCOLOR}"
+        echo -e "${CYAN}2) Playit.gg Manager${ENDCOLOR}"
+        echo -e "${BLUE}3) Tailscale Manager${ENDCOLOR}"
         echo -e "${BLUE}4) Check installed tools${ENDCOLOR}"
         echo -e "${RED}5) Exit${ENDCOLOR}"
         echo
@@ -543,9 +853,9 @@ main_menu() {
 
         case "$choice" in
             0) disable_menu_lock; pterodactyl_menu ;;
-            1) run_action install_cloudflared ;;
-            2) run_action install_playit ;;
-            3) run_action install_tailscale ;;
+            1) disable_menu_lock; cloudflared_menu ;;
+            2) disable_menu_lock; playit_menu ;;
+            3) disable_menu_lock; tailscale_menu ;;
             4) disable_menu_lock; show_status ;;
             5)
                 disable_menu_lock
