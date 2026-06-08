@@ -574,6 +574,8 @@ install_tailscale() {
     run_step "Installing Tailscale" \
         bash -c "curl -fsSL https://tailscale.com/install.sh | sh" || return 1
 
+    start_tailscaled || return 1
+
     info "Connecting this machine to Tailscale..."
     if [[ -n "$SUDO" ]]; then
         sudo tailscale up --auth-key="$auth_key" 2>&1 | tee -a "$LOG_FILE"
@@ -592,6 +594,24 @@ install_tailscale() {
     success "Tailscale installed and connected."
 }
 
+start_tailscaled() {
+    if ! command -v tailscaled >/dev/null 2>&1; then
+        fail "tailscaled was not found after installation."
+        return 1
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        run_step "Starting Tailscale daemon" \
+            $SUDO systemctl enable --now tailscaled || return 1
+    elif command -v service >/dev/null 2>&1; then
+        run_step "Starting Tailscale daemon" \
+            $SUDO service tailscaled start || return 1
+    else
+        fail "Could not start tailscaled automatically. Start tailscaled manually, then run Tailscale reconnect."
+        return 1
+    fi
+}
+
 reconnect_tailscale() {
     local auth_key="${TAILSCALE_AUTH_KEY:-}"
     local status
@@ -602,6 +622,8 @@ reconnect_tailscale() {
         install_tailscale
         return $?
     fi
+
+    start_tailscaled || return 1
 
     echo -e "${BOLD}Reconnect Tailscale${ENDCOLOR}"
     warn "Paste the new Tailscale auth key. It will not be saved in this installer file or printed on screen."
